@@ -1,0 +1,49 @@
+{
+  "name": "doc2md",
+  "version": "1.0.0",
+  "description": "Convert Office documents and PDFs to Markdown",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "doc2md": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --apply src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "markdown",
+    "docx",
+    "pdf",
+    "xlsx",
+    "pptx",
+    "converter",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "commander": "^14.0.3",
+    "glob": "^13.0.6",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "turndown": "^7.2.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
