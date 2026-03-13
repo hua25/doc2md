@@ -187,12 +187,8 @@ documents/
 ## 系统要求
 
 - Node.js >= 18.0.0
-- PowerPoint 转换需要安装 [pptx-to-md](https://crates.io/crates/pptx-to-md)（可选）
 
-```bash
-# 安装 pptx-to-md（用于 PPTX 转换）
-cargo install pptx-to-md
-```
+所有文档格式的转换均使用纯 JavaScript/TypeScript 实现，无需额外安装外部工具。
 
 ## 本地测试
 

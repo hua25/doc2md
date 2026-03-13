@@ -76,8 +76,8 @@
           ▼                   ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │   DOCX 转换器    │ │   PPTX 转换器    │ │   XLSX 转换器    │
-│    Mammoth      │ │  pptx-to-md     │ │     xlsx        │
-│   (npm 包)      │ │  (Rust CLI)     │ │  (SheetJS)      │
+│    Mammoth      │ │ officeparser    │ │     xlsx        │
+│   (npm 包)      │ │  (纯 JS)        │ │  (SheetJS)      │
 └────────┬────────┘ └────────┬────────┘ └────────┬────────┘
          │                   │                   │
          │    ┌──────────────┴───────────────────┘
@@ -151,7 +151,7 @@ src/
 | GFM 支持 | @truto/turndown-plugin-gfm | ^1.x | GitHub 风格表格和代码块支持 |
 | XLSX 解析 | xlsx | ^0.18.x | SheetJS，680万周下载，最全面的电子表格库 |
 | PDF 解析 | pdf-parse | ^1.x | 纯 TypeScript，跨平台，无 native 依赖 |
-| PPTX 转换 | pptx-to-md | latest | Rust CLI 工具，功能完整 |
+| PPTX 解析 | officeparser | latest | 纯 JavaScript，支持多种 Office 格式 |
 
 ### 开发依赖
 
@@ -387,10 +387,10 @@ export class DocxConverter extends BaseConverter {
 
 ### 2. PowerPoint (.pptx) 转换
 
-**技术方案**：pptx-to-md (Rust CLI)
+**技术方案**：officeparser (纯 JavaScript)
 
 **架构说明**：
-由于 Node.js 生态中缺乏成熟的 PPTX 解析库，采用调用 Rust CLI 工具 `pptx-to-md` 的方案。
+使用 `officeparser` 库解析 PPTX 文件，提取幻灯片内容和元数据，无需外部依赖。
 
 **转换流程**：
 
@@ -399,13 +399,18 @@ pptx
   │
   ▼
 ┌─────────────────┐
-│ pptx-to-md      │  ← Rust CLI 工具
-│ (child_process) │
+│ officeparser    │  ← 纯 JavaScript 库
+│ parseOffice()   │
+└────────┬────────┘
+         │ 结构化对象
+         ▼
+┌─────────────────┐
+│ 文本提取与格式化 │  ← 标题识别、列表处理
 └────────┬────────┘
          │ Markdown
          ▼
 ┌─────────────────┐
-│ 后处理          │  ← 路径调整、格式优化
+│ 输出文件        │
 └─────────────────┘
 ```
 
@@ -413,28 +418,19 @@ pptx
 
 ```typescript
 // src/converters/pptx.ts
-import { execSync } from 'child_process';
-import { ensureRustTool } from '../utils/rust';
+import officeparser from 'officeparser';
 
-export class PptxConverter extends BaseConverter {
+export class PptxConverter implements Converter {
   async convert(inputPath: string, options: ConvertOptions): Promise<ConversionResult> {
-    // 确保 Rust 工具已安装
-    await ensureRustTool('pptx-to-md');
-
-    // 创建临时输出目录
-    const tempDir = await this.createTempDir();
-
-    try {
-      // 调用 Rust CLI 工具
-      execSync(`pptx-to-md "${inputPath}" -o "${tempDir}"`, {
-        stdio: options.verbose ? 'inherit' : 'pipe',
-      });
-
-      // 读取生成的 Markdown
-      const markdown = await fs.readFile(
-        path.join(tempDir, 'output.md'),
-        'utf-8'
-      );
+    const result = await officeparser.parseOffice(inputPath);
+    
+    // 提取幻灯片内容
+    const slides = result.content;
+    
+    // 格式化为 Markdown
+    for (const slide of slides) {
+      // 处理每张幻灯片
+    }
 
       // 处理图像路径
       const { markdown: processedMd, images } = await this.processImages(
@@ -933,7 +929,7 @@ export class Doc2MdError extends Error {
 |------|----------|----------|
 | 文件不存在 | 抛出 FILE_NOT_FOUND | "文件不存在: {path}" |
 | 格式不支持 | 抛出 UNSUPPORTED_FORMAT | "不支持的格式: {ext}" |
-| PPTX 工具未安装 | 自动安装或提示安装 | "请运行: cargo install pptx-to-md" |
+| PPTX 解析失败 | 抛出转换错误 | "PPTX 转换失败: {error}" |
 | 转换失败 | 保留部分结果，记录警告 | 输出警告列表 |
 | 图像提取失败 | 跳过该图像，继续处理 | "部分图像提取失败" |
 
@@ -1034,7 +1030,8 @@ npm install --save-dev doc2md
 ### 系统依赖
 
 - **Node.js**: >= 18.0.0
-- **Rust**: 仅用于 PPTX 转换（可选，工具会自动检查并提示安装）
+
+无需额外系统依赖，所有转换功能均使用纯 JavaScript/TypeScript 实现。
 
 ---
 
@@ -1042,7 +1039,7 @@ npm install --save-dev doc2md
 
 ### v1.0 (MVP)
 - [x] DOCX 转换
-- [x] PPTX 转换（依赖 Rust 工具）
+- [x] PPTX 转换（纯 JavaScript）
 - [x] XLSX 转换
 - [x] PDF 基础转换
 - [x] 图像提取
@@ -1061,7 +1058,7 @@ npm install --save-dev doc2md
 - [ ] VS Code 插件
 
 ### v2.0
-- [ ] 内置 PPTX 解析器（不依赖 Rust）
+- [x] PPTX 解析器（纯 JavaScript，已实现）
 - [ ] AI 增强转换（可选集成 LLM）
 - [ ] 所见即所得预览模式
 - [ ] 企业版（Web UI + 权限管理）

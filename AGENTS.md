@@ -136,6 +136,6 @@ src/
 
 1. This is an ESM-only project - no CommonJS
 2. Node.js >= 18.0.0 required
-3. PPTX conversion requires external `pptx-to-md` Rust tool
+3. All converters are pure JavaScript/TypeScript implementations
 4. Images are extracted to `./images/` directory relative to output
 5. All relative imports in source must use `.js` extension

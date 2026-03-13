@@ -1,9 +1,24 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import officeparser from 'officeparser';
 import type { ConvertOptions, ConversionResult, Converter } from '../types/index.js';
 import { Doc2MdError, ErrorCode } from '../types/index.js';
 import { getFileSize } from '../utils/fs.js';
+
+const { parseOffice } = officeparser;
+
+interface OfficeParserSlide {
+  type: 'slide';
+  children: Array<{ type: string; text?: string; children?: Array<{ text?: string }> }>;
+  metadata?: { slideNumber?: number };
+}
+
+interface OfficeParserResult {
+  type: string;
+  metadata?: { title?: string };
+  content: OfficeParserSlide[];
+  toText: () => string;
+}
 
 export class PptxConverter implements Converter {
   async convert(inputPath: string, options: ConvertOptions): Promise<ConversionResult> {
@@ -12,58 +27,30 @@ export class PptxConverter implements Converter {
 
     try {
       const outputPath = options.outputPath || inputPath.replace(/\.pptx$/i, '.md');
-
-      // 检查 pptx-to-md 是否已安装
-      if (!this.isPptxToMdInstalled()) {
-        throw new Doc2MdError(
-          ErrorCode.DEPENDENCY_MISSING,
-          '未找到 pptx-to-md 工具。请运行: cargo install pptx-to-md'
-        );
+      const result = await parseOffice(inputPath) as OfficeParserResult;
+      
+      if (!result || !result.content || result.content.length === 0) {
+        warnings.push('演示文稿为空或无法提取内容');
       }
 
-      // 创建临时目录
-      const tempDir = await fs.mkdtemp('/tmp/pptx-convert-');
+      const markdown = this.generateMarkdown(result, inputPath);
 
-      try {
-        // 调用 pptx-to-md
-        execSync(`pptx-to-md "${inputPath}" -o "${tempDir}/output.md"`, {
-          stdio: options.verbose ? 'inherit' : 'pipe',
-        });
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, markdown, 'utf-8');
 
-        // 读取生成的 Markdown
-        const markdown = await fs.readFile(
-          path.join(tempDir, 'output.md'),
-          'utf-8'
-        );
-
-        // 处理图像
-        const { markdown: processedMd, images } = await this.processImages(
-          markdown,
-          tempDir,
-          path.dirname(outputPath)
-        );
-
-        // 写入最终输出
-        await fs.mkdir(path.dirname(outputPath), { recursive: true });
-        await fs.writeFile(outputPath, processedMd, 'utf-8');
-
-        const fileSize = await getFileSize(inputPath);
-
-        return {
-          inputPath,
-          outputPath,
-          markdown: processedMd,
-          images,
-          metadata: {
-            sourceFormat: 'pptx',
-            fileSize,
-            duration: Date.now() - startTime,
-            warnings,
-          },
-        };
-      } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      }
+      return {
+        inputPath,
+        outputPath,
+        markdown,
+        images: [],
+        metadata: {
+          sourceFormat: 'pptx',
+          fileSize: await getFileSize(inputPath),
+          pageCount: result?.content?.length || 0,
+          duration: Date.now() - startTime,
+          warnings,
+        },
+      };
     } catch (error) {
       if (error instanceof Doc2MdError) {
         throw error;
@@ -76,76 +63,69 @@ export class PptxConverter implements Converter {
     }
   }
 
-  private isPptxToMdInstalled(): boolean {
-    try {
-      execSync('which pptx-to-md', { stdio: 'pipe' });
-      return true;
-    } catch {
-      return false;
+  private generateMarkdown(result: OfficeParserResult, inputPath: string): string {
+    const title = result.metadata?.title || path.basename(inputPath, '.pptx');
+    let markdown = `# ${title}\n\n`;
+
+    if (!result.content || result.content.length === 0) {
+      return markdown;
     }
+
+    for (let i = 0; i < result.content.length; i++) {
+      const slide = result.content[i];
+      markdown += this.formatSlide(slide, i + 1);
+      markdown += '\n---\n\n';
+    }
+
+    return markdown.trim();
   }
 
-  private async processImages(
-    markdown: string,
-    tempDir: string,
-    outputDir: string
-  ): Promise<{ markdown: string; images: Array<{ id: string; fileName: string; path: string; contentType: string; size: number }> }> {
-    const images: Array<{ id: string; fileName: string; path: string; contentType: string; size: number }> = [];
-    const imagesDir = path.join(outputDir, 'images');
-    await fs.mkdir(imagesDir, { recursive: true });
+  private formatSlide(slide: OfficeParserSlide, slideNumber: number): string {
+    const texts = this.extractTexts(slide);
+    
+    if (texts.length === 0) {
+      return `## 幻灯片 ${slideNumber}\n\n（空白幻灯片）`;
+    }
 
-    // 查找 Markdown 中的图像引用
-    const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-    let match;
-    let imageIndex = 0;
-    let processedMarkdown = markdown;
+    const firstText = texts[0];
+    const isTitle = firstText.length < 60 && !firstText.startsWith('•') && !firstText.startsWith('-');
+    
+    let markdown = '';
+    
+    if (isTitle) {
+      markdown += `## ${firstText}\n\n`;
+      texts.shift();
+    } else {
+      markdown += `## 幻灯片 ${slideNumber}\n\n`;
+    }
 
-    while ((match = imageRegex.exec(markdown)) !== null) {
-      const [, alt, src] = match;
-      
-      if (src.startsWith('./') || !src.startsWith('http')) {
-        const srcPath = path.join(tempDir, src);
-        
-        try {
-          const stats = await fs.stat(srcPath);
-          if (stats.isFile()) {
-            imageIndex++;
-            const ext = path.extname(src) || '.png';
-            const fileName = `image-${String(imageIndex).padStart(3, '0')}${ext}`;
-            const destPath = path.join(imagesDir, fileName);
+    for (const text of texts) {
+      const trimmedText = text.trim();
+      if (trimmedText.startsWith('•') || trimmedText.startsWith('-')) {
+        markdown += `- ${trimmedText.substring(1).trim()}\n`;
+      } else {
+        markdown += `${trimmedText}\n\n`;
+      }
+    }
 
-            await fs.copyFile(srcPath, destPath);
+    return markdown.trim();
+  }
 
-            images.push({
-              id: String(imageIndex),
-              fileName,
-              path: destPath,
-              contentType: this.getContentType(ext),
-              size: stats.size,
-            });
-
-            processedMarkdown = processedMarkdown.replace(
-              src,
-              `./images/${fileName}`
-            );
+  private extractTexts(slide: OfficeParserSlide): string[] {
+    const texts: string[] = [];
+    
+    for (const child of slide.children || []) {
+      if (child.text) {
+        texts.push(child.text);
+      } else if (child.children) {
+        for (const grandChild of child.children) {
+          if (grandChild.text) {
+            texts.push(grandChild.text);
           }
-        } catch {
-          // 图像文件不存在，跳过
         }
       }
     }
 
-    return { markdown: processedMarkdown, images };
-  }
-
-  private getContentType(ext: string): string {
-    const mimeTypes: Record<string, string> = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-    };
-    return mimeTypes[ext.toLowerCase()] || 'image/png';
+    return texts.filter(t => t && t.trim());
   }
 }
