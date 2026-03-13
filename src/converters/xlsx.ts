@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import * as path from 'path';
 import type { ConvertOptions, ConversionResult, Converter } from '../types/index.js';
 import { Doc2MdError, ErrorCode } from '../types/index.js';
